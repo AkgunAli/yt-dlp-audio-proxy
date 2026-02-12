@@ -26,12 +26,12 @@ RUN pip install --no-cache-dir -r requirements.txt
 RUN yt-dlp -U
 
 # PO Token server'ı kur ve build et
-RUN git clone --single-branch --branch 1.2.2 https://github.com/Brainicism/bgutil-ytdlp-pot-provider.git /app/po-token-server \
-    && cd /app/po-token-server/server/ \
-    && npm install \
-    && npx tsc \
-    && echo "✓ PO Token build tamamlandı" \
-    && test -f /app/po-token-server/server/build/main.js || (echo "✗ Build başarısız!" && exit 1)
+RUN git clone --single-branch --branch master \
+    https://github.com/jim60105/bgutil-ytdlp-pot-provider-rs.git /app/po-token-server \
+    && cd /app/po-token-server \
+    && cargo build --release \
+    && cp target/release/bgutil-pot-provider /app/po-token-server/bin/ \
+    && echo "✓ Rust PO Token build tamamlandı"
 
 # Uygulama dosyalarını kopyala
 COPY . .
