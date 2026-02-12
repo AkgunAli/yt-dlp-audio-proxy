@@ -1,7 +1,7 @@
 # ====================
-# Stage 1: Rust Builder (daha yeni Rust ile)
+# Stage 1: Rust Builder (güncel Rust ile – 1.93 slim-bookworm)
 # ====================
-FROM rust:1.88-slim-bookworm AS rust-builder   # ← 1.88+ zorunlu, 1.88 kullanıyoruz
+FROM rust:1.93-slim-bookworm AS rust-builder
 
 # Gerekli sistem paketleri
 RUN apt-get update && apt-get install -y --no-install-recommends \
