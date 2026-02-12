@@ -1,12 +1,9 @@
 # ====================
 # Stage 1: Rust Builder (güncel Rust ile – 1.93 slim-bookworm)
 # ====================
-# ====================
-# Stage 1: Rust Builder (güncel Rust ile – 1.93 slim-bookworm)
-# ====================
 FROM rust:1.93-slim-bookworm AS rust-builder
 
-# Gerekli sistem paketleri – rusty_v8 indirme için curl + python3 EKLEDİK
+# Gerekli sistem paketleri – rusty_v8 için curl + python3 EKLEDİK
 RUN apt-get update && apt-get install -y --no-install-recommends \
     git \
     ca-certificates \
@@ -18,7 +15,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 WORKDIR /build
 
-# Repo'yu clone + build (burası değişmiyor)
+# Repo'yu clone + build
 RUN git clone --single-branch --branch master \
     https://github.com/jim60105/bgutil-ytdlp-pot-provider-rs.git . \
     && cargo build --release \
@@ -40,7 +37,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     gnupg \
     && mkdir -p /etc/apt/keyrings \
     && curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key | gpg --dearmor -o /etc/apt/keyrings/nodesource.gpg \
-    && echo "deb [signed-by=/etc/apt/keyrings/nodesource.gpg] https://deb.nodesource.com/node_20.x nodistro main" | tee /etc/apt/sources.list.d/nodesource.list \
+    && echo "deb [signed-by=/etc/apt/keyrings/nodesource.gpg] https://deb.nodesource.com/node_20.x nodistro main" | tee /etc/sources.list.d/nodesource.list \
     && apt-get update \
     && apt-get install -y --no-install-recommends nodejs \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
