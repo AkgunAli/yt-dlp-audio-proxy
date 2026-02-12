@@ -3,6 +3,7 @@ version: '3.8'
 services:
   youtube-proxy:
     build: .
+    container_name: youtube-proxy
     ports:
       - "8000:8000"
       - "8080:8080"
@@ -16,3 +17,4 @@ services:
       interval: 30s
       timeout: 10s
       retries: 3
+      start_period: 10s
