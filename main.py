@@ -110,29 +110,35 @@ async def extract_audio_url(youtube_url: str) -> Optional[str]:
     try:
         with yt_dlp.YoutubeDL(get_ydl_opts()) as ydl:
             info = ydl.extract_info(youtube_url, download=False)
-            if 'url' in info:
-                print("✓ Direkt URL bulundu")
-                return info['url']
             
-            for fmt in info.get('formats', []):
+            audio_url = info.get('url')
+            if audio_url:
+                print(f"✓ Direkt audio URL bulundu")
+                return audio_url
+            
+            # Alternatif: formats içinden audio-only bul
+            formats = info.get('formats', [])
+            for fmt in formats:
                 if fmt.get('acodec') != 'none' and fmt.get('vcodec') == 'none':
-                    url = fmt.get('url')
-                    if url:
-                        print("✓ Audio-only format bulundu")
-                        return url
-   except yt_dlp.utils.DownloadError as e:
+                    audio_url = fmt.get('url')
+                    if audio_url:
+                        print(f"✓ Audio-only format bulundu")
+                        return audio_url
+    
+    except yt_dlp.utils.DownloadError as e:
         if "DRM protected" in str(e):
-            print(f"DRM korumalı video: {youtube_url} – İndirme/akış mümkün değil.")
-            return None
+            print(f"DRM korumalı video tespit edildi: {youtube_url}")
         else:
-            raise
+            print(f"yt-dlp DownloadError: {str(e)}")
+        traceback.print_exc()
+        return None
+    
     except Exception as e:
         print(f"✗ Extraction hatası: {str(e)}")
         traceback.print_exc()
         return None
     
     return None
-
 async def stream_audio(audio_url: str, video_id: str):
     async def generate():
         try:
