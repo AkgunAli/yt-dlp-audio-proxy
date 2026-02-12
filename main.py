@@ -45,34 +45,30 @@ async def startup_event():
 
 def get_ydl_opts():
     opts = {
-        'format': 'bestaudio[ext=m4a]/bestaudio/best',
-        'quiet': False,                # Hata ayıklama için verbose açtık
-        'verbose': True,
+        'format': 'bestaudio/best',  # [ext=m4a] kısıtlamasını kaldır – en iyi audio'yu al, m4a yoksa opus/webm kabul et
+        # veya daha güvenli: 'bestaudio[ext=webm]/bestaudio[ext=m4a]/best' – webm opus sık çıkıyor
+        'quiet': False,
+        'verbose': True,  # logları artır, format listesini gör
         'no_warnings': False,
         'simulate': True,
         'noplaylist': True,
         'socket_timeout': 30,
-        
-        # Cookies desteği – age-restricted için çok önemli
-        'cookiefile': '/app/cookies.txt',  # Dosya yoksa yt-dlp hata vermez, atlar
-        
+
+        'cookiefile': '/app/cookies.txt',
+
         'extractor_args': {
             'youtube': {
-                'player_client': ['ios', 'android', 'web', 'tv_embedded'],
-                'skip': ['hls', 'dash', 'webpage'],
-                'player_skip': ['js', 'configs'],
-                # 'disable_innertube': '1',  # Gerekirse uncomment
+                'player_client': ['web', 'android', 'ios'],  # 'web' ekle – en stabil client, m4a dönme ihtimali yüksek
+                # 'tv_embedded' kaldırabilirsin eğer sorun çıkarıyorsa
+                'skip': ['dash', 'hls'],  # DASH/HLS atla ama gerekirse kaldır
+                # 'formats': ['dashy'],  # Eğer DASH istiyorsan uncomment
             },
             'youtubepot-bgutilhttp': {
                 'base_url': PO_SERVER_URL,
             },
         },
-        
-        'http_headers': {
-            'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1',
-            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-            'Accept-Language': 'en-US,en;q=0.9',
-        },
+
+        'http_headers': { ... }  # mevcut kalabilir
     }
     return opts
 
