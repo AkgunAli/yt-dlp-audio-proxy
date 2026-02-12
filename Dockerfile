@@ -1,19 +1,24 @@
 # ====================
 # Stage 1: Rust Builder (güncel Rust ile – 1.93 slim-bookworm)
 # ====================
+# ====================
+# Stage 1: Rust Builder (güncel Rust ile – 1.93 slim-bookworm)
+# ====================
 FROM rust:1.93-slim-bookworm AS rust-builder
 
-# Gerekli sistem paketleri
+# Gerekli sistem paketleri – rusty_v8 indirme için curl + python3 EKLEDİK
 RUN apt-get update && apt-get install -y --no-install-recommends \
     git \
     ca-certificates \
     pkg-config \
     libssl-dev \
+    curl \
+    python3 \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /build
 
-# Repo'yu clone + build
+# Repo'yu clone + build (burası değişmiyor)
 RUN git clone --single-branch --branch master \
     https://github.com/jim60105/bgutil-ytdlp-pot-provider-rs.git . \
     && cargo build --release \
