@@ -9,8 +9,8 @@ echo "📋 Node.js: $(node --version)"
 echo "📋 NPM: $(npm --version)"
 echo "📋 Python: $(python --version)"
 
-# PO Token binary kontrolü
-PO_BINARY="/app/po-token-server/bin/bgutil-pot-provider"
+# PO Token binary kontrolü – binary adı DÜZELTİLDİ
+PO_BINARY="/app/po-token-server/bin/bgutil-pot"
 if [ ! -x "$PO_BINARY" ]; then
     echo "❌ HATA: PO Token binary bulunamadı veya çalıştırılamaz!"
     ls -la /app/po-token-server/bin/ || echo "Klasör boş"
@@ -20,7 +20,7 @@ fi
 # PO Token server'ı başlat (Rust versiyonu: server subcommand)
 PO_PORT=4416
 echo "🚀 PO Token server başlatılıyor... (Rust binary, port: $PO_PORT)"
-"$PO_BINARY" server --port "$PO_PORT" > /tmp/po-token.log 2>&1 &
+"$PO_BINARY" server --host 0.0.0.0 --port "$PO_PORT" > /tmp/po-token.log 2>&1 &
 PO_TOKEN_PID=$!
 
 echo "PO Token PID: $PO_TOKEN_PID"
