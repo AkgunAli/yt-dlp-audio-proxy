@@ -6,37 +6,41 @@ import time
 from datetime import datetime, timedelta
 from typing import Dict, Tuple, Optional
 import subprocess
-import os
+import asyncio
 
 app = FastAPI(title="YouTube Audio Proxy (PO Token)")
 
 # Cache: {video_id: (audio_url, expire_time)}
 audio_cache: Dict[str, Tuple[str, datetime]] = {}
 
-def check_po_token_provider():
-    """PO Token provider kurulu mu kontrol et"""
+# PO Token server durumu
+po_token_available = False
+
+async def check_po_token_server():
+    """PO Token server çalışıyor mu kontrol et"""
+    global po_token_available
     try:
-        result = subprocess.run(
-            ['yt-dlp', '-v', '--print', 'filename', 'https://www.youtube.com/watch?v=dQw4w9WgXcQ'],
-            capture_output=True,
-            text=True,
-            timeout=10
-        )
-        output = result.stderr
-        
-        if 'PO Token Providers: bgutil' in output:
-            print("✓ PO Token provider aktif")
-            return True
-        else:
-            print("⚠ PO Token provider bulunamadı")
-            return False
+        async with httpx.AsyncClient() as client:
+            response = await client.get("http://localhost:8080/health", timeout=2.0)
+            po_token_available = response.status_code == 200
+            if po_token_available:
+                print("✓ PO Token server aktif")
+            return po_token_available
     except Exception as e:
-        print(f"⚠ PO Token kontrol hatası: {e}")
+        po_token_available = False
+        print(f"⚠ PO Token server ulaşılamıyor: {e}")
         return False
 
-def get_ydl_opts_with_po_token():
-    """PO Token ile yt-dlp seçenekleri"""
-    opts = {
+@app.on_event("startup")
+async def startup_event():
+    """Başlangıçta PO Token kontrolü"""
+    print("🔍 PO Token server kontrol ediliyor...")
+    await asyncio.sleep(2)  # Server'ın başlaması için bekle
+    await check_po_token_server()
+
+def get_ydl_opts():
+    """yt-dlp seçenekleri"""
+    return {
         'format': 'bestaudio[ext=m4a]/bestaudio/best',
         'quiet': True,
         'no_warnings': True,
@@ -44,10 +48,9 @@ def get_ydl_opts_with_po_token():
         'noplaylist': True,
         'socket_timeout': 30,
         
-        # İyileştirilmiş extractor ayarları
         'extractor_args': {
             'youtube': {
-                'player_client': ['ios', 'android', 'web'],
+                'player_client': ['ios', 'android', 'tv_embedded'],
                 'skip': ['hls', 'dash']
             }
         },
@@ -56,26 +59,6 @@ def get_ydl_opts_with_po_token():
             'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15',
             'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
             'Accept-Language': 'en-US,en;q=0.9',
-        },
-    }
-    
-    return opts
-
-def get_ydl_opts_fallback():
-    """Fallback seçenekler"""
-    return {
-        'format': 'bestaudio[ext=m4a]/bestaudio/best',
-        'quiet': True,
-        'no_warnings': True,
-        'simulate': True,
-        'noplaylist': True,
-        'socket_timeout': 30,
-        'age_limit': None,  # Yaş kontrolünü devre dışı bırak
-        'extractor_args': {
-            'youtube': {
-                'player_client': ['tv_embedded'],  # En az kısıtlamalı client
-                'skip': ['hls', 'dash']
-            }
         },
     }
 
@@ -101,36 +84,22 @@ async def proxy_audio(video_id: str = Path(..., description="YouTube Video ID"))
     
     youtube_url = f"https://www.youtube.com/watch?v={video_id}"
     
-    # Strateji 1: PO Token ile dene (en güçlü)
-    print("→ Strateji 1: PO Token ile deneniyor...")
-    audio_url = await extract_audio_url(youtube_url, get_ydl_opts_with_po_token())
-    
-    # Strateji 2: TV Embedded client (fallback)
-    if not audio_url:
-        print("→ Strateji 2: TV Embedded client deneniyor...")
-        audio_url = await extract_audio_url(youtube_url, get_ydl_opts_fallback())
+    # Audio URL'i çıkar
+    audio_url = await extract_audio_url(youtube_url)
     
     if not audio_url:
-        # Detaylı hata mesajı
-        has_po_token = check_po_token_provider()
+        # PO Token durumunu kontrol et
+        await check_po_token_server()
         
-        error_detail = {
-            "error": "Bot koruması aşılamadı",
-            "video_id": video_id,
-            "po_token_installed": has_po_token
-        }
-        
-        if not has_po_token:
-            error_detail["solution"] = "PO Token provider kurun: pip install bgutil-ytdlp-pot-provider"
-            error_detail["instructions"] = [
-                "1. pip install bgutil-ytdlp-pot-provider",
-                "2. Docker ile PO Token server başlatın: docker run -d -p 8080:8080 brainicism/bgutil-ytdlp-pot-provider",
-                "3. Sunucuyu restart edin"
-            ]
-        else:
-            error_detail["message"] = "Video yaş kısıtlamalı veya bölge kısıtlamalı olabilir"
-        
-        raise HTTPException(status_code=403, detail=error_detail)
+        raise HTTPException(
+            status_code=403,
+            detail={
+                "error": "Bot koruması aşılamadı",
+                "video_id": video_id,
+                "po_token_server": "active" if po_token_available else "inactive",
+                "message": "PO Token server çalışmıyor, konteyner loglarını kontrol edin" if not po_token_available else "Video kısıtlamalı olabilir"
+            }
+        )
     
     # Cache'e ekle
     expire = now + timedelta(minutes=50)
@@ -141,10 +110,10 @@ async def proxy_audio(video_id: str = Path(..., description="YouTube Video ID"))
     
     return await stream_audio(audio_url, video_id)
 
-async def extract_audio_url(youtube_url: str, ydl_opts: dict) -> Optional[str]:
+async def extract_audio_url(youtube_url: str) -> Optional[str]:
     """YouTube'dan audio URL'i çıkarır"""
     try:
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+        with yt_dlp.YoutubeDL(get_ydl_opts()) as ydl:
             info = ydl.extract_info(youtube_url, download=False)
             
             audio_url = info.get('url')
@@ -160,12 +129,8 @@ async def extract_audio_url(youtube_url: str, ydl_opts: dict) -> Optional[str]:
                 print(f"✓ Audio URL bulundu")
                 return audio_url
             
-    except yt_dlp.utils.DownloadError as e:
-        error_msg = str(e)
-        # Sessizce devam et
-        pass
     except Exception as e:
-        pass
+        print(f"✗ Extraction hatası: {str(e)[:200]}")
     
     return None
 
@@ -208,54 +173,34 @@ async def stream_audio(audio_url: str, video_id: str):
 @app.get("/health")
 async def health():
     """Health check + PO Token durumu"""
-    has_po_token = check_po_token_provider()
+    await check_po_token_server()
     
     return {
         "status": "ok",
         "cache_size": len(audio_cache),
-        "po_token_provider": "installed" if has_po_token else "missing",
-        "recommendation": "Install PO Token for best results" if not has_po_token else "All good!"
+        "po_token_server": "active ✓" if po_token_available else "inactive ✗",
+        "recommendation": "Konteyner loglarını kontrol edin" if not po_token_available else "All systems operational"
     }
 
-@app.get("/setup-instructions")
-async def setup_instructions():
-    """PO Token kurulum talimatları"""
-    return {
-        "title": "PO Token Kurulumu",
-        "why": "YouTube'un bot korumasını aşmak için gerekli",
-        "steps": [
-            {
-                "step": 1,
-                "title": "Plugin Kurulumu",
-                "command": "pip install bgutil-ytdlp-pot-provider"
-            },
-            {
-                "step": 2,
-                "title": "Docker ile PO Token Server (Kolay Yöntem)",
-                "commands": [
-                    "docker run -d --name po-token-server -p 8080:8080 brainicism/bgutil-ytdlp-pot-provider",
-                    "# Server otomatik başlar, restart gerek yok"
-                ]
-            },
-            {
-                "step": 3,
-                "title": "Manuel Kurulum (Docker yoksa)",
-                "commands": [
-                    "git clone --single-branch --branch 1.2.2 https://github.com/Brainicism/bgutil-ytdlp-pot-provider.git",
-                    "cd bgutil-ytdlp-pot-provider/server/",
-                    "npm install",
-                    "npx tsc",
-                    "node build/main.js &"
-                ]
-            },
-            {
-                "step": 4,
-                "title": "Test",
-                "command": "curl http://localhost:8000/health"
-            }
-        ],
-        "note": "PO Token server arka planda çalışmalı. Docker ile en kolay."
+@app.get("/po-token-status")
+async def po_token_status():
+    """PO Token server detaylı durum"""
+    await check_po_token_server()
+    
+    status = {
+        "server_running": po_token_available,
+        "server_url": "http://localhost:8080"
     }
+    
+    if po_token_available:
+        try:
+            async with httpx.AsyncClient() as client:
+                response = await client.get("http://localhost:8080/health", timeout=2.0)
+                status["server_response"] = response.json() if response.status_code == 200 else "error"
+        except Exception as e:
+            status["error"] = str(e)
+    
+    return status
 
 @app.post("/clear-cache")
 async def clear_cache():
