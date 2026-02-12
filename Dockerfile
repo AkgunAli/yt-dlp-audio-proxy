@@ -46,6 +46,7 @@ WORKDIR /app
 
 # Derlenmiş Rust binary'yi kopyala
 COPY --from=rust-builder /app/po-token-server/bin/bgutil-pot-provider /app/po-token-server/bin/bgutil-pot-provider
+COPY --from=rust-builder /app/po-token-server/bin/bgutil-pot /app/po-token-server/bin/bgutil-pot
 
 # Python paketleri
 COPY requirements.txt .
