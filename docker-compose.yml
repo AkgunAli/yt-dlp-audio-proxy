@@ -6,11 +6,12 @@ services:
     container_name: youtube-proxy
     ports:
       - "8000:8000"
-      - "8080:8080"
+      # 8080'i kaldırmıştım çünkü kodda kullanılmıyor – isterseniz bırakın
     environment:
       - PYTHONUNBUFFERED=1
     volumes:
       - ./cache:/app/cache
+      - ./cookies.txt:/app/cookies.txt:ro  # <--- YENİ: cookies mount
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
