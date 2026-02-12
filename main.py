@@ -5,7 +5,6 @@ import httpx
 import time
 from datetime import datetime, timedelta
 from typing import Dict, Tuple, Optional
-import subprocess
 import asyncio
 
 app = FastAPI(title="YouTube Audio Proxy (PO Token)")
@@ -66,6 +65,9 @@ def get_ydl_opts():
 async def proxy_audio(video_id: str = Path(..., description="YouTube Video ID")):
     """
     YouTube audio proxy - PO Token ile bot korumasını aşar
+    
+    Kullanım:
+    curl http://localhost:8000/proxy-audio/dQw4w9WgXcQ
     """
     now = datetime.utcnow()
     start_time = time.time()
@@ -202,9 +204,24 @@ async def po_token_status():
     
     return status
 
+@app.get("/cache-stats")
+async def cache_stats():
+    """Cache istatistikleri"""
+    now = datetime.utcnow()
+    active = sum(1 for _, (_, expire) in audio_cache.items() if expire > now)
+    return {
+        "total_cached": len(audio_cache),
+        "active": active,
+        "expired": len(audio_cache) - active
+    }
+
 @app.post("/clear-cache")
 async def clear_cache():
-    """Cache temizle"""
+    """Tüm cache'i temizler"""
     size = len(audio_cache)
     audio_cache.clear()
-    return {"success": True, "cleared": size}
+    print(f"✓ Cache temizlendi: {size} item")
+    return {
+        "success": True,
+        "cleared_items": size
+    }
