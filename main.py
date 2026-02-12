@@ -45,10 +45,9 @@ async def startup_event():
 
 def get_ydl_opts():
     opts = {
-        'format': 'bestaudio/best',  # [ext=m4a] kısıtlamasını kaldır – en iyi audio'yu al, m4a yoksa opus/webm kabul et
-        # veya daha güvenli: 'bestaudio[ext=webm]/bestaudio[ext=m4a]/best' – webm opus sık çıkıyor
+        'format': 'bestaudio/best',
         'quiet': False,
-        'verbose': True,  # logları artır, format listesini gör
+        'verbose': True,
         'no_warnings': False,
         'simulate': True,
         'noplaylist': True,
@@ -58,17 +57,20 @@ def get_ydl_opts():
 
         'extractor_args': {
             'youtube': {
-                'player_client': ['web', 'android', 'ios'],  # 'web' ekle – en stabil client, m4a dönme ihtimali yüksek
-                # 'tv_embedded' kaldırabilirsin eğer sorun çıkarıyorsa
-                'skip': ['dash', 'hls'],  # DASH/HLS atla ama gerekirse kaldır
-                # 'formats': ['dashy'],  # Eğer DASH istiyorsan uncomment
+                'player_client': ['web', 'android', 'ios'],
             },
             'youtubepot-bgutilhttp': {
                 'base_url': PO_SERVER_URL,
             },
         },
 
-        'http_headers': { ... }  # mevcut kalabilir
+        'http_headers': {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
+            'Accept-Language': 'en-US,en;q=0.5',
+            'Referer': 'https://www.youtube.com/',
+            'Sec-Fetch-Dest': 'document'
+        },
     }
     return opts
 
