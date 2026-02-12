@@ -124,9 +124,16 @@ async def extract_audio_url(youtube_url: str) -> Optional[str]:
                     if url:
                         print("✓ Audio-only format bulundu")
                         return url
+   except yt_dlp.utils.DownloadError as e:
+        if "DRM protected" in str(e):
+            print(f"DRM korumalı video: {youtube_url} – İndirme/akış mümkün değil.")
+            return None
+        else:
+            raise
     except Exception as e:
         print(f"✗ Extraction hatası: {str(e)}")
         traceback.print_exc()
+        return None
     
     return None
 
