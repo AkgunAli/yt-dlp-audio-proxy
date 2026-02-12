@@ -45,8 +45,7 @@ async def startup_event():
 
 def get_ydl_opts():
     opts = {
-        'format': 'bestaudio/best',
-        'quiet': False,
+        'format': 'best[ext=mp4]/bestaudio/best',
         'verbose': True,
         'no_warnings': False,
         'simulate': True,
