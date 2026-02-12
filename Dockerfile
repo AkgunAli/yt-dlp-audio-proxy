@@ -49,6 +49,8 @@ RUN pip install --no-cache-dir -r requirements.txt \
 
 # Uygulama dosyaları
 COPY . .
+COPY cookies.txt /app/cookies.txt
+
 
 # Cookies dosyası varsa kopyala (opsiyonel – age-restricted için)
 # COPY cookies.txt /app/cookies.txt
