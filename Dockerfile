@@ -43,9 +43,8 @@ COPY --from=rust-builder /app/po-token-server/bin/bgutil-pot /app/po-token-serve
 
 # Python paketleri + yt-dlp + PO Token plugin
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt \
-    && pip install --no-cache-dir --upgrade yt-dlp \
-    && pip install --no-cache-dir bgutil-ytdlp-pot-provider
+RUN pip install --no-cache-dir --upgrade yt-dlp \
+    && pip install --no-cache-dir "git+https://github.com/yt-dlp/yt-dlp.git@master#egg=yt-dlp"  # nightly
 
 # Uygulama dosyaları
 COPY . .
