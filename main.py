@@ -5,107 +5,64 @@ import httpx
 import time
 from datetime import datetime, timedelta
 from typing import Dict, Tuple, Optional
-import random
+import subprocess
+import os
 
-app = FastAPI(title="YouTube Audio Proxy (No Cookie)")
+app = FastAPI(title="YouTube Audio Proxy (PO Token)")
 
 # Cache: {video_id: (audio_url, expire_time)}
 audio_cache: Dict[str, Tuple[str, datetime]] = {}
 
-# User-Agent rotasyonu
-USER_AGENTS = [
-    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-    'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-    'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-    'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1',
-    'Mozilla/5.0 (iPad; CPU OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1',
-]
+def check_po_token_provider():
+    """PO Token provider kurulu mu kontrol et"""
+    try:
+        result = subprocess.run(
+            ['yt-dlp', '-v', '--print', 'filename', 'https://www.youtube.com/watch?v=dQw4w9WgXcQ'],
+            capture_output=True,
+            text=True,
+            timeout=10
+        )
+        output = result.stderr
+        
+        if 'PO Token Providers: bgutil' in output:
+            print("✓ PO Token provider aktif")
+            return True
+        else:
+            print("⚠ PO Token provider bulunamadı")
+            return False
+    except Exception as e:
+        print(f"⚠ PO Token kontrol hatası: {e}")
+        return False
 
-def get_random_user_agent():
-    """Rastgele user agent döndür"""
-    return random.choice(USER_AGENTS)
-
-def get_ydl_opts_strategy_1():
-    """Strateji 1: iOS client"""
-    return {
+def get_ydl_opts_with_po_token():
+    """PO Token ile yt-dlp seçenekleri"""
+    opts = {
         'format': 'bestaudio[ext=m4a]/bestaudio/best',
         'quiet': True,
         'no_warnings': True,
         'simulate': True,
         'noplaylist': True,
         'socket_timeout': 30,
+        
+        # İyileştirilmiş extractor ayarları
         'extractor_args': {
             'youtube': {
-                'player_client': ['ios'],
+                'player_client': ['ios', 'android', 'web'],
                 'skip': ['hls', 'dash']
             }
         },
+        
         'http_headers': {
-            'User-Agent': 'com.google.ios.youtube/19.09.3 (iPhone14,3; U; CPU iOS 15_6 like Mac OS X)',
-            'X-YouTube-Client-Name': '5',
-            'X-YouTube-Client-Version': '19.09.3',
-        }
-    }
-
-def get_ydl_opts_strategy_2():
-    """Strateji 2: Android Music client"""
-    return {
-        'format': 'bestaudio[ext=m4a]/bestaudio/best',
-        'quiet': True,
-        'no_warnings': True,
-        'simulate': True,
-        'noplaylist': True,
-        'socket_timeout': 30,
-        'extractor_args': {
-            'youtube': {
-                'player_client': ['android_music'],
-                'skip': ['hls', 'dash']
-            }
-        },
-        'http_headers': {
-            'User-Agent': 'com.google.android.apps.youtube.music/6.42.52 (Linux; U; Android 13)',
-        }
-    }
-
-def get_ydl_opts_strategy_3():
-    """Strateji 3: TV client"""
-    return {
-        'format': 'bestaudio[ext=m4a]/bestaudio/best',
-        'quiet': True,
-        'no_warnings': True,
-        'simulate': True,
-        'noplaylist': True,
-        'socket_timeout': 30,
-        'extractor_args': {
-            'youtube': {
-                'player_client': ['tv_embedded'],
-                'skip': ['hls', 'dash']
-            }
-        },
-    }
-
-def get_ydl_opts_strategy_4():
-    """Strateji 4: Web + Random User Agent"""
-    return {
-        'format': 'bestaudio[ext=m4a]/bestaudio/best',
-        'quiet': True,
-        'no_warnings': True,
-        'simulate': True,
-        'noplaylist': True,
-        'socket_timeout': 30,
-        'http_headers': {
-            'User-Agent': get_random_user_agent(),
+            'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15',
             'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-            'Accept-Language': 'en-US,en;q=0.5',
-            'Accept-Encoding': 'gzip, deflate',
-            'DNT': '1',
-            'Connection': 'keep-alive',
-            'Upgrade-Insecure-Requests': '1'
-        }
+            'Accept-Language': 'en-US,en;q=0.9',
+        },
     }
+    
+    return opts
 
-def get_ydl_opts_strategy_5():
-    """Strateji 5: Android embedded"""
+def get_ydl_opts_fallback():
+    """Fallback seçenekler"""
     return {
         'format': 'bestaudio[ext=m4a]/bestaudio/best',
         'quiet': True,
@@ -113,27 +70,19 @@ def get_ydl_opts_strategy_5():
         'simulate': True,
         'noplaylist': True,
         'socket_timeout': 30,
+        'age_limit': None,  # Yaş kontrolünü devre dışı bırak
         'extractor_args': {
             'youtube': {
-                'player_client': ['android_embedded'],
+                'player_client': ['tv_embedded'],  # En az kısıtlamalı client
                 'skip': ['hls', 'dash']
             }
         },
     }
-
-# Tüm stratejiler
-STRATEGIES = [
-    ("iOS Client", get_ydl_opts_strategy_1),
-    ("Android Music", get_ydl_opts_strategy_2),
-    ("TV Embedded", get_ydl_opts_strategy_3),
-    ("Web + Random UA", get_ydl_opts_strategy_4),
-    ("Android Embedded", get_ydl_opts_strategy_5),
-]
 
 @app.get("/proxy-audio/{video_id}")
 async def proxy_audio(video_id: str = Path(..., description="YouTube Video ID")):
     """
-    YouTube audio proxy endpoint - Çoklu strateji ile bot korumasını aşar
+    YouTube audio proxy - PO Token ile bot korumasını aşar
     """
     now = datetime.utcnow()
     start_time = time.time()
@@ -152,35 +101,45 @@ async def proxy_audio(video_id: str = Path(..., description="YouTube Video ID"))
     
     youtube_url = f"https://www.youtube.com/watch?v={video_id}"
     
-    # Tüm stratejileri sırayla dene
-    for strategy_name, strategy_func in STRATEGIES:
-        print(f"→ Deneniyor: {strategy_name}")
-        audio_url = await extract_audio_url(youtube_url, strategy_func())
-        
-        if audio_url:
-            print(f"✓ BAŞARILI: {strategy_name}")
-            
-            # Cache'e ekle
-            expire = now + timedelta(minutes=50)
-            audio_cache[video_id] = (audio_url, expire)
-            
-            elapsed = time.time() - start_time
-            print(f"✓ Extraction tamamlandı ({elapsed:.2f}s)")
-            
-            return await stream_audio(audio_url, video_id)
-        
-        # Stratejiler arası kısa bekleme
-        await asyncio.sleep(0.5)
+    # Strateji 1: PO Token ile dene (en güçlü)
+    print("→ Strateji 1: PO Token ile deneniyor...")
+    audio_url = await extract_audio_url(youtube_url, get_ydl_opts_with_po_token())
     
-    # Hiçbir strateji çalışmadı
-    raise HTTPException(
-        status_code=403,
-        detail={
-            "error": "Tüm stratejiler başarısız oldu",
-            "tried_strategies": len(STRATEGIES),
-            "message": "YouTube bu video için tüm client'ları engelliyor. Video yaş kısıtlamalı veya bölge kısıtlamalı olabilir."
+    # Strateji 2: TV Embedded client (fallback)
+    if not audio_url:
+        print("→ Strateji 2: TV Embedded client deneniyor...")
+        audio_url = await extract_audio_url(youtube_url, get_ydl_opts_fallback())
+    
+    if not audio_url:
+        # Detaylı hata mesajı
+        has_po_token = check_po_token_provider()
+        
+        error_detail = {
+            "error": "Bot koruması aşılamadı",
+            "video_id": video_id,
+            "po_token_installed": has_po_token
         }
-    )
+        
+        if not has_po_token:
+            error_detail["solution"] = "PO Token provider kurun: pip install bgutil-ytdlp-pot-provider"
+            error_detail["instructions"] = [
+                "1. pip install bgutil-ytdlp-pot-provider",
+                "2. Docker ile PO Token server başlatın: docker run -d -p 8080:8080 brainicism/bgutil-ytdlp-pot-provider",
+                "3. Sunucuyu restart edin"
+            ]
+        else:
+            error_detail["message"] = "Video yaş kısıtlamalı veya bölge kısıtlamalı olabilir"
+        
+        raise HTTPException(status_code=403, detail=error_detail)
+    
+    # Cache'e ekle
+    expire = now + timedelta(minutes=50)
+    audio_cache[video_id] = (audio_url, expire)
+    
+    elapsed = time.time() - start_time
+    print(f"✓ Extraction tamamlandı ({elapsed:.2f}s)")
+    
+    return await stream_audio(audio_url, video_id)
 
 async def extract_audio_url(youtube_url: str, ydl_opts: dict) -> Optional[str]:
     """YouTube'dan audio URL'i çıkarır"""
@@ -198,14 +157,14 @@ async def extract_audio_url(youtube_url: str, ydl_opts: dict) -> Optional[str]:
                         break
             
             if audio_url:
+                print(f"✓ Audio URL bulundu")
                 return audio_url
             
     except yt_dlp.utils.DownloadError as e:
         error_msg = str(e)
-        # Sessizce geç, başka strateji denenecek
+        # Sessizce devam et
         pass
     except Exception as e:
-        # Sessizce geç
         pass
     
     return None
@@ -218,7 +177,7 @@ async def stream_audio(audio_url: str, video_id: str):
                 timeout=60.0,
                 follow_redirects=True,
                 headers={
-                    'User-Agent': get_random_user_agent(),
+                    'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15',
                     'Range': 'bytes=0-',
                 }
             ) as client:
@@ -248,30 +207,59 @@ async def stream_audio(audio_url: str, video_id: str):
 
 @app.get("/health")
 async def health():
-    """Health check endpoint"""
+    """Health check + PO Token durumu"""
+    has_po_token = check_po_token_provider()
+    
     return {
         "status": "ok",
         "cache_size": len(audio_cache),
-        "available_strategies": len(STRATEGIES)
+        "po_token_provider": "installed" if has_po_token else "missing",
+        "recommendation": "Install PO Token for best results" if not has_po_token else "All good!"
     }
 
-@app.get("/cache-stats")
-async def cache_stats():
-    """Cache istatistikleri"""
-    now = datetime.utcnow()
-    active = sum(1 for _, (_, expire) in audio_cache.items() if expire > now)
+@app.get("/setup-instructions")
+async def setup_instructions():
+    """PO Token kurulum talimatları"""
     return {
-        "total_cached": len(audio_cache),
-        "active": active,
-        "expired": len(audio_cache) - active
+        "title": "PO Token Kurulumu",
+        "why": "YouTube'un bot korumasını aşmak için gerekli",
+        "steps": [
+            {
+                "step": 1,
+                "title": "Plugin Kurulumu",
+                "command": "pip install bgutil-ytdlp-pot-provider"
+            },
+            {
+                "step": 2,
+                "title": "Docker ile PO Token Server (Kolay Yöntem)",
+                "commands": [
+                    "docker run -d --name po-token-server -p 8080:8080 brainicism/bgutil-ytdlp-pot-provider",
+                    "# Server otomatik başlar, restart gerek yok"
+                ]
+            },
+            {
+                "step": 3,
+                "title": "Manuel Kurulum (Docker yoksa)",
+                "commands": [
+                    "git clone --single-branch --branch 1.2.2 https://github.com/Brainicism/bgutil-ytdlp-pot-provider.git",
+                    "cd bgutil-ytdlp-pot-provider/server/",
+                    "npm install",
+                    "npx tsc",
+                    "node build/main.js &"
+                ]
+            },
+            {
+                "step": 4,
+                "title": "Test",
+                "command": "curl http://localhost:8000/health"
+            }
+        ],
+        "note": "PO Token server arka planda çalışmalı. Docker ile en kolay."
     }
 
 @app.post("/clear-cache")
 async def clear_cache():
-    """Tüm cache'i temizler"""
+    """Cache temizle"""
     size = len(audio_cache)
     audio_cache.clear()
     return {"success": True, "cleared": size}
-
-# asyncio import ekle
-import asyncio
