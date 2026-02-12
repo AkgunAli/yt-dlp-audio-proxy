@@ -1,9 +1,9 @@
 # ====================
-# Stage 1: Rust Builder (PO Token server'ı build et)
+# Stage 1: Rust Builder (daha yeni Rust ile)
 # ====================
-FROM rust:1.85-slim-bookworm AS rust-builder
+FROM rust:1.88-slim-bookworm AS rust-builder   # ← 1.88+ zorunlu, 1.88 kullanıyoruz
 
-# Gerekli bağımlılıklar (git vs. için)
+# Gerekli sistem paketleri
 RUN apt-get update && apt-get install -y --no-install-recommends \
     git \
     ca-certificates \
@@ -13,7 +13,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 WORKDIR /build
 
-# Repo'yu clone et ve build
+# Repo'yu clone + build
 RUN git clone --single-branch --branch master \
     https://github.com/jim60105/bgutil-ytdlp-pot-provider-rs.git . \
     && cargo build --release \
@@ -22,11 +22,11 @@ RUN git clone --single-branch --branch master \
     && echo "✓ Rust PO Token build tamamlandı"
 
 # ====================
-# Stage 2: Runtime (Python + ffmpeg + Node vs. + derlenmiş binary)
+# Stage 2: Runtime Image
 # ====================
 FROM python:3.12-slim-bookworm
 
-# Sistem paketleri (ffmpeg, curl, git vs.)
+# Sistem bağımlılıkları + Node 20
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ffmpeg \
     git \
@@ -42,10 +42,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 WORKDIR /app
 
-# Rust'tan derlenmiş binary'yi kopyala
+# Derlenmiş Rust binary'yi kopyala
 COPY --from=rust-builder /app/po-token-server/bin/bgutil-pot-provider /app/po-token-server/bin/bgutil-pot-provider
 
-# Python requirements
+# Python paketleri
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt \
     && pip install --no-cache-dir --upgrade yt-dlp
@@ -53,10 +53,8 @@ RUN pip install --no-cache-dir -r requirements.txt \
 # Uygulama dosyaları
 COPY . .
 
-# Portlar
 EXPOSE 8000
 
-# Startup script
 RUN chmod +x docker-entrypoint.sh
 
 CMD ["/app/docker-entrypoint.sh"]
