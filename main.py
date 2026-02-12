@@ -14,32 +14,41 @@ audio_cache: Dict[str, Tuple[str, datetime]] = {}
 
 # PO Token server durumu
 po_token_available = False
+PO_SERVER_URL = "http://localhost:4416"  # Default bgutil portu – gerekirse .env'den çek
 
-async def check_po_token_server():
-    """PO Token server çalışıyor mu kontrol et"""
+async def check_po_token_server(max_retries=3):
+    """PO Token server çalışıyor mu kontrol et (retry ile)"""
     global po_token_available
-    try:
-        async with httpx.AsyncClient() as client:
-            response = await client.get("http://localhost:8080/health", timeout=2.0)
-            po_token_available = response.status_code == 200
-            if po_token_available:
-                print("✓ PO Token server aktif")
-            return po_token_available
-    except Exception as e:
-        po_token_available = False
-        print(f"⚠ PO Token server ulaşılamıyor: {e}")
-        return False
+    for attempt in range(1, max_retries + 1):
+        try:
+            async with httpx.AsyncClient() as client:
+                # Sadece bağlantı testi – /health yok, root / bile yeterli olabilir
+                response = await client.head(f"{PO_SERVER_URL}/", timeout=3.0)
+                po_token_available = 200 <= response.status_code < 500
+                if po_token_available:
+                    print(f"✓ PO Token server aktif ({PO_SERVER_URL})")
+                    return True
+                else:
+                    print(f"⚠ PO server yanıt kodu: {response.status_code}")
+        except Exception as e:
+            print(f"⚠ PO Token server ulaşılamıyor (deneme {attempt}/{max_retries}): {e}")
+        
+        if attempt < max_retries:
+            await asyncio.sleep(3)  # Retry arası bekle
+    
+    po_token_available = False
+    return False
 
 @app.on_event("startup")
 async def startup_event():
-    """Başlangıçta PO Token kontrolü"""
+    """Başlangıçta PO Token kontrolü + retry"""
     print("🔍 PO Token server kontrol ediliyor...")
-    await asyncio.sleep(2)  # Server'ın başlaması için bekle
+    await asyncio.sleep(5)  # Server'ın başlaması için biraz daha uzun bekle
     await check_po_token_server()
 
 def get_ydl_opts():
-    """yt-dlp seçenekleri"""
-    return {
+    """yt-dlp seçenekleri – PO Token provider'ı otomatik kullanacak şekilde"""
+    opts = {
         'format': 'bestaudio[ext=m4a]/bestaudio/best',
         'quiet': True,
         'no_warnings': True,
@@ -50,25 +59,22 @@ def get_ydl_opts():
         'extractor_args': {
             'youtube': {
                 'player_client': ['ios', 'android', 'tv_embedded'],
-                'skip': ['hls', 'dash']
+                'skip': ['hls', 'dash'],
+                # PO Token provider'ı belirt (plugin yüklüyse otomatik alır, ama emin olmak için)
+                # 'pot_provider': f'{PO_SERVER_URL}'  # Eğer plugin destekliyorsa ekle
             }
         },
         
         'http_headers': {
-            'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15',
+            'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1',
             'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
             'Accept-Language': 'en-US,en;q=0.9',
         },
     }
+    return opts
 
 @app.get("/proxy-audio/{video_id}")
 async def proxy_audio(video_id: str = Path(..., description="YouTube Video ID")):
-    """
-    YouTube audio proxy - PO Token ile bot korumasını aşar
-    
-    Kullanım:
-    curl http://localhost:8000/proxy-audio/dQw4w9WgXcQ
-    """
     now = datetime.utcnow()
     start_time = time.time()
     print(f"\n[{now.strftime('%H:%M:%S')}] İstek: video_id={video_id}")
@@ -90,21 +96,21 @@ async def proxy_audio(video_id: str = Path(..., description="YouTube Video ID"))
     audio_url = await extract_audio_url(youtube_url)
     
     if not audio_url:
-        # PO Token durumunu kontrol et
         await check_po_token_server()
+        detail = {
+            "error": "Bot koruması aşılamadı",
+            "video_id": video_id,
+            "po_token_server": "active" if po_token_available else "inactive",
+        }
+        if not po_token_available:
+            detail["message"] = "PO Token server çalışmıyor – logları kontrol edin (port 4416 açık mı?)"
+        else:
+            detail["message"] = "Video kısıtlamalı olabilir veya extraction başarısız"
         
-        raise HTTPException(
-            status_code=403,
-            detail={
-                "error": "Bot koruması aşılamadı",
-                "video_id": video_id,
-                "po_token_server": "active" if po_token_available else "inactive",
-                "message": "PO Token server çalışmıyor, konteyner loglarını kontrol edin" if not po_token_available else "Video kısıtlamalı olabilir"
-            }
-        )
+        raise HTTPException(status_code=403, detail=detail)
     
-    # Cache'e ekle
-    expire = now + timedelta(minutes=50)
+    # Cache'e ekle (expire'ı kısalttım – YouTube URL'leri çabuk geçersizleşir)
+    expire = now + timedelta(minutes=30)
     audio_cache[video_id] = (audio_url, expire)
     
     elapsed = time.time() - start_time
@@ -113,35 +119,34 @@ async def proxy_audio(video_id: str = Path(..., description="YouTube Video ID"))
     return await stream_audio(audio_url, video_id)
 
 async def extract_audio_url(youtube_url: str) -> Optional[str]:
-    """YouTube'dan audio URL'i çıkarır"""
     try:
         with yt_dlp.YoutubeDL(get_ydl_opts()) as ydl:
             info = ydl.extract_info(youtube_url, download=False)
             
             audio_url = info.get('url')
-            
-            if not audio_url:
-                formats = info.get('formats', [])
-                for fmt in formats:
-                    if fmt.get('acodec') != 'none' and fmt.get('vcodec') == 'none':
-                        audio_url = fmt.get('url')
-                        break
-            
             if audio_url:
-                print(f"✓ Audio URL bulundu")
+                print(f"✓ Direkt audio URL bulundu")
                 return audio_url
             
+            # Alternatif: formats içinden audio-only bul
+            formats = info.get('formats', [])
+            for fmt in formats:
+                if fmt.get('acodec') != 'none' and fmt.get('vcodec') == 'none':
+                    audio_url = fmt.get('url')
+                    if audio_url:
+                        print(f"✓ Audio-only format bulundu")
+                        return audio_url
+            
     except Exception as e:
-        print(f"✗ Extraction hatası: {str(e)[:200]}")
+        print(f"✗ Extraction hatası: {str(e)[:300]} ...")
     
     return None
 
 async def stream_audio(audio_url: str, video_id: str):
-    """Audio stream'i proxy eder"""
     async def generate():
         try:
             async with httpx.AsyncClient(
-                timeout=60.0,
+                timeout=90.0,  # Stream uzun sürebilir
                 follow_redirects=True,
                 headers={
                     'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15',
@@ -168,45 +173,40 @@ async def stream_audio(audio_url: str, video_id: str):
         media_type="audio/mp4",
         headers={
             "Accept-Ranges": "bytes",
-            "Cache-Control": "public, max-age=3600"
+            "Cache-Control": "public, max-age=1800"
         }
     )
 
 @app.get("/health")
 async def health():
-    """Health check + PO Token durumu"""
     await check_po_token_server()
-    
     return {
         "status": "ok",
         "cache_size": len(audio_cache),
-        "po_token_server": "active ✓" if po_token_available else "inactive ✗",
-        "recommendation": "Konteyner loglarını kontrol edin" if not po_token_available else "All systems operational"
+        "po_token_server": "active ✓" if po_token_available else "inactive ✗ (port 4416 kontrol et)",
+        "timestamp": datetime.utcnow().isoformat(),
+        "recommendation": "PO server loglarını incele" if not po_token_available else "Sistem çalışıyor"
     }
 
 @app.get("/po-token-status")
 async def po_token_status():
-    """PO Token server detaylı durum"""
     await check_po_token_server()
-    
     status = {
         "server_running": po_token_available,
-        "server_url": "http://localhost:8080"
+        "server_url": PO_SERVER_URL
     }
-    
     if po_token_available:
         try:
             async with httpx.AsyncClient() as client:
-                response = await client.get("http://localhost:8080/health", timeout=2.0)
-                status["server_response"] = response.json() if response.status_code == 200 else "error"
+                # Sadece bağlantı testi
+                resp = await client.head(PO_SERVER_URL, timeout=3.0)
+                status["reachable"] = resp.status_code < 500
         except Exception as e:
             status["error"] = str(e)
-    
     return status
 
 @app.get("/cache-stats")
 async def cache_stats():
-    """Cache istatistikleri"""
     now = datetime.utcnow()
     active = sum(1 for _, (_, expire) in audio_cache.items() if expire > now)
     return {
@@ -217,11 +217,7 @@ async def cache_stats():
 
 @app.post("/clear-cache")
 async def clear_cache():
-    """Tüm cache'i temizler"""
     size = len(audio_cache)
     audio_cache.clear()
     print(f"✓ Cache temizlendi: {size} item")
-    return {
-        "success": True,
-        "cleared_items": size
-    }
+    return {"success": True, "cleared_items": size}
